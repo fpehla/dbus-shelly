@@ -70,7 +70,8 @@ class Meter(object):
 
 		await settings.add_settings(
 			Setting(settingprefix + "/ClassAndVrmInstance", "grid:40", 0, 0, alias="instance"),
-			Setting(settingprefix + '/Position', 0, 0, 2, alias="position")
+			Setting(settingprefix + '/Position', 0, 0, 2, alias="position"),
+			Setting(settingprefix + "/CustomName", "Shelly Pro 1 PM", 0, 0, alias="customname")
 		)
 
 		# Determine role and instance
@@ -84,12 +85,17 @@ class Meter(object):
 		self.service.add_item(TextItem('/Mgmt/ProcessVersion', VERSION))
 		self.service.add_item(TextItem('/Mgmt/Connection', f"WebSocket {host}:{port}"))
 		self.service.add_item(IntegerItem('/DeviceInstance', instance))
-		self.service.add_item(IntegerItem('/ProductId', 0xB034, text=unit_productid))
-		self.service.add_item(TextItem('/ProductName', "Shelly energy meter"))
+		self.service.add_item(IntegerItem('/ProductId', 0xFFFF, text=unit_productid))
+		self.service.add_item(TextItem('/ProductName', "Shelly Pro 1 PM"))
 		self.service.add_item(TextItem('/FirmwareVersion', fw))
 		self.service.add_item(IntegerItem('/Connected', 1))
+		self.service.add_item(IntegerItem('/NumberOfPhases', 1))
 		self.service.add_item(IntegerItem('/RefreshTime', 100))
 		self.service.add_item(IntegerItem('/UpdateIndex', 0))
+
+		# CustomName
+		self.service.add_item(TextItem('/CustomName', settings.get_value(settings.alias("customname")),
+			writeable=True,	onchange=self.name_changed))
 
 		# Role
 		self.service.add_item(TextArrayItem('/AllowedRoles',
@@ -214,6 +220,15 @@ class Meter(object):
 		settings.set_value(p, "{}:{}".format(val, instance))
 
 		self.destroy() # restart
+		return True
+
+	def name_changed(self, val):
+		settings = self.get_settings()
+		if settings is None:
+			return False
+
+		settings.set_value(settings.alias("customname"), val)
+
 		return True
 
 	def position_changed(self, val):
