@@ -89,6 +89,7 @@ class Meter(object):
 		self.service.add_item(TextItem('/FirmwareVersion', fw))
 		self.service.add_item(IntegerItem('/Connected', 1))
 		self.service.add_item(IntegerItem('/RefreshTime', 100))
+		self.service.add_item(IntegerItem('/UpdateIndex', 0))
 
 		# Role
 		self.service.add_item(TextArrayItem('/AllowedRoles',
@@ -103,15 +104,20 @@ class Meter(object):
 				writeable=True, onchange=self.position_changed))
 
 		# Meter paths
-		self.service.add_item(DoubleItem('/Ac/Energy/Forward', None, text=unit_kwh))
-		self.service.add_item(DoubleItem('/Ac/Energy/Reverse', None, text=unit_kwh))
+		# fpehla: For testing Pro1PM don't create /Energy/*, have to figure out how to compute Energy
+		#self.service.add_item(DoubleItem('/Ac/Energy/Forward', None, text=unit_kwh))
+		#self.service.add_item(DoubleItem('/Ac/Energy/Reverse', None, text=unit_kwh))
 		self.service.add_item(DoubleItem('/Ac/Power', None, text=unit_watt))
-		for prefix in (f"/Ac/L{x}" for x in range(1, 4)):
-			self.service.add_item(DoubleItem(prefix + '/Voltage', None, text=unit_volt))
-			self.service.add_item(DoubleItem(prefix + '/Current', None, text=unit_amp))
-			self.service.add_item(DoubleItem(prefix + '/Power', None, text=unit_watt))
-			self.service.add_item(DoubleItem(prefix + '/Energy/Forward', None, text=unit_kwh))
-			self.service.add_item(DoubleItem(prefix + '/Energy/Reverse', None, text=unit_kwh))
+		# fpehla: For testing Pro1PM only create L1
+		# also change indentation for not running within a loop
+		#for prefix in (f"/Ac/L{x}" for x in range(1, 4)):
+		prefix = '/AC/L1'
+		self.service.add_item(DoubleItem(prefix + '/Voltage', None, text=unit_volt))
+		self.service.add_item(DoubleItem(prefix + '/Current', None, text=unit_amp))
+		self.service.add_item(DoubleItem(prefix + '/Power', None, text=unit_watt))
+		# fpehla: For testing Pro1PM don't create /Energy/*, have to figure out how to compute Energy
+		#self.service.add_item(DoubleItem(prefix + '/Energy/Forward', None, text=unit_kwh))
+		#self.service.add_item(DoubleItem(prefix + '/Energy/Reverse', None, text=unit_kwh))
 
 		return True
 
@@ -124,39 +130,67 @@ class Meter(object):
 	
 	async def update(self, data):
 		# NotifyStatus has power, current, voltage and energy values
-		if self.service and data.get('method') == 'NotifyStatus':
+		if self.service and data.get('method') == 'NotifyFullStatus':
 			try:
-				d = data['params']['em:0']
+				# fpehla: Data for Shelly Pro1PM is in 'switch:0' instead of 'em:0'
+				#d = data['params']['em:0']
+			    d = data['params']['switch:0']
 			except KeyError:
 				pass
 			else:
 				with self.service as s:
-					s['/Ac/L1/Voltage'] = d["a_voltage"]
-					s['/Ac/L2/Voltage'] = d["b_voltage"]
-					s['/Ac/L3/Voltage'] = d["c_voltage"]
-					s['/Ac/L1/Current'] = d["a_current"]
-					s['/Ac/L2/Current'] = d["b_current"]
-					s['/Ac/L3/Current'] = d["c_current"]
-					s['/Ac/L1/Power'] = d["a_act_power"]
-					s['/Ac/L2/Power'] = d["b_act_power"]
-					s['/Ac/L3/Power'] = d["c_act_power"]
+					logger.debug("process switch:0")
 
-					s['/Ac/Power'] = d["a_act_power"] + d["b_act_power"] + d["c_act_power"]
+					# fpehla: For Pro1PM voltage is in field 'voltage'
+					try:
+						voltage = d["voltage"]
+					except KeyError:
+						pass
+					else:
+						logger.debug("/Ac/L1/Voltage={}".format(voltage))
+						s['/Ac/L1/Voltage'] = voltage
 
-			try:
-				d = data['params']['emdata:0']
-			except KeyError:
-				pass
-			else:
-				with self.service as s:
-					s["/Ac/Energy/Forward"] = round(d["total_act"]/1000, 1)
-					s["/Ac/Energy/Reverse"] = round(d["total_act_ret"]/1000, 1)
-					s["/Ac/L1/Energy/Forward"] = round(d["a_total_act_energy"]/1000, 1)
-					s["/Ac/L1/Energy/Reverse"] = round(d["a_total_act_ret_energy"]/1000, 1)
-					s["/Ac/L2/Energy/Forward"] = round(d["b_total_act_energy"]/1000, 1)
-					s["/Ac/L2/Energy/Reverse"] = round(d["b_total_act_ret_energy"]/1000, 1)
-					s["/Ac/L3/Energy/Forward"] = round(d["c_total_act_energy"]/1000, 1)
-					s["/Ac/L3/Energy/Reverse"] = round(d["c_total_act_ret_energy"]/1000, 1)
+					# fpehla: For Pro1PM current is in field 'current'
+					try:
+						current = d["current"]
+					except KeyError:
+						pass
+					else:
+						logger.debug("/Ac/L1/Current={}".format(current))
+						s['/Ac/L1/Current'] = current
+
+					# fpehla: For Pro1PM apparent power is in 'apower'
+					# Negative apower means Inverter is Producing Energy
+					try:
+						apower = d["apower"]
+					except KeyError:
+						pass
+					else:
+						logger.debug("/Ac/L1/Power={}".format(apower))
+						s['/Ac/L1/Power'] = apower
+						logger.debug("/Ac/Power={}".format(apower))
+						s['/Ac/Power'] = apower
+
+					s['/UpdateIndex'] = (s['/UpdateIndex'] + 1 ) % 256
+
+
+			# fpehla: Have to figure out how to compute power from Pro1PM data
+			# Don't use aenergy structure from Pro1PM as this contains the sum of consumed and generated power
+			# Only use negative apower as value for power in pvinverter mode
+			#try:
+			#	d = data['params']['emdata:0']
+			#except KeyError:
+			#	pass
+			#else:
+			#	with self.service as s:
+			#		s["/Ac/Energy/Forward"] = round(d["total_act"]/1000, 1)
+			#		s["/Ac/Energy/Reverse"] = round(d["total_act_ret"]/1000, 1)
+			#		s["/Ac/L1/Energy/Forward"] = round(d["a_total_act_energy"]/1000, 1)
+			#		s["/Ac/L1/Energy/Reverse"] = round(d["a_total_act_ret_energy"]/1000, 1)
+			#		s["/Ac/L2/Energy/Forward"] = round(d["b_total_act_energy"]/1000, 1)
+			#		s["/Ac/L2/Energy/Reverse"] = round(d["b_total_act_ret_energy"]/1000, 1)
+			#		s["/Ac/L3/Energy/Forward"] = round(d["c_total_act_energy"]/1000, 1)
+			#		s["/Ac/L3/Energy/Reverse"] = round(d["c_total_act_ret_energy"]/1000, 1)
 
 	def role_instance(self, value):
 		val = value.split(':')

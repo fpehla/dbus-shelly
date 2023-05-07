@@ -92,8 +92,7 @@ def main():
 
 	mainloop = asyncio.get_event_loop()
 	mainloop.run_until_complete(
-		# fpehla: Port 8001 for L1
-		websockets.serve(Server(lambda: Meter(bus_type)), '', 8001))
+		websockets.serve(Server(lambda: Meter(bus_type)), '', 8000))
 
 	try:
 		logger.info("Starting main loop")
